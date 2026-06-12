@@ -1,0 +1,63 @@
+name: PixelLens
+options:
+  deploymentTarget:
+    macOS: "13.0"
+settings:
+  base:
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 6.0
+    CODE_SIGN_STYLE: Automatic
+targets:
+  DPIEngine:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/DPIEngine/DPIEngine.cpp
+      - path: Sources/DPIEngine/include
+        buildPhase: headers
+        headerVisibility: public
+    settings:
+      base:
+        PRODUCT_NAME: DPIEngine
+        PRODUCT_MODULE_NAME: DPIEngine
+        PRODUCT_BUNDLE_IDENTIFIER: com.mikata.PixelLens.DPIEngine
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: DPIEngine
+        CLANG_CXX_LANGUAGE_STANDARD: gnu++17
+        CLANG_ENABLE_MODULES: YES
+  PixelLens:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/DPIInspectorApp
+      - path: Sources/AppCore
+      - path: Resources
+    dependencies:
+      - target: DPIEngine
+    settings:
+      base:
+        PRODUCT_NAME: PixelLens
+        PRODUCT_MODULE_NAME: PixelLens
+        PRODUCT_BUNDLE_IDENTIFIER: com.mikata.PixelLens
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: PixelLens
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.graphics-design
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        SWIFT_ENABLE_CXX_INTEROP: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+schemes:
+  PixelLens:
+    build:
+      targets:
+        PixelLens: all
+        DPIEngine: [build]
+    run:
+      config: Debug
+    archive:
+      config: Release

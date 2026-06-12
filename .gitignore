@@ -1,0 +1,16 @@
+.DS_Store
+
+/.build/
+
+app/.build/
+app/.derivedData/
+app/.swiftpm/
+app/Release/
+
+poc/app/.build/
+poc/app/sample.jpg
+poc/app/sample_300dpi.jpg
+poc/app/.sample_300dpi.jpg-zZ3H
+
+*.xcresult
+pixellens_icon.png
