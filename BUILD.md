@@ -160,7 +160,6 @@ codesign --force --deep --sign - <local-app-dir>/PixelLens.app
 ```
 
 補足:
-
 * `.derivedData` の中身は Xcode の内部生成物なので、普段使いの場所としては扱わない
 * Finder から開くのは `<local-app-dir>/PixelLens.app` を使う
 * コード変更後は、再ビルドしてこの `.app` を置き換える
