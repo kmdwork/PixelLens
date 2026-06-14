@@ -2,35 +2,78 @@
 
 ## 日本語
 
-`PixelLens` は macOS 向けの軽量な JPEG 解像度確認・変更ツールです。一般的な画像編集ソフトではなく、`DPI確認`、`DPI変更`、`印刷サイズ確認` に特化しています。
+`PixelLens` は macOS 向けの `JPEG 内部構造ビューア` です。  
+一般的な画像編集ソフトではなく、JPEG ファイルのセグメント構造、EXIF / TIFF / JFIF 情報、対応するバイト範囲を可視化するための軽量なインスペクタです。
 
-### 現在の機能
+Ver1 では、`DPI変更ツール` から方針を切り替え、`画像ファイルをデータレベルで観察するツール` として再設計しています。
+
+### Ver1 の現在機能
 
 * JPEG の読み込み
-* 画像サイズの表示
-* 解像度情報の個別表示
-  * `TIFF`
-  * `EXIF`
+* 画像プレビュー表示
+* JPEG 構造一覧の表示
+  * `SOI`
+  * `APP0`
+  * `APP1`
+  * `DQT`
+  * `DHT`
+  * `SOF`
+  * `SOS`
+  * `EOI`
+* `APP0 / APP1` の内部要素表示
   * `JFIF`
-* `DPI X / DPI Y` の変更
-* 別名保存
-* 印刷サイズの計算表示
+  * `TIFF Header`
+  * `IFD0`
+  * `Exif IFD`
+* `Bytes` ビューでのページ単位表示
+* 構造選択時の対応バイト範囲ハイライト
+* `Inspector` での詳細表示
+  * `name`
+  * `marker / kind`
+  * `offset / length`
+  * `payload range`
+  * `decoded value`
+  * `raw bytes / payload bytes`
+* 限定的な構造化編集
+  * `Edit Mode`
+  * `pending changes`
+  * `Save As`
 
-### 現在の仕様
+### 現在の編集対象
 
-* MVP では `JPEG` のみ対応
-* 保存時に更新するのは `TIFF / EXIF系` 解像度
-* `JFIF` は表示対象だが更新対象外
-* リサンプリングは行わない
-* ピクセル数・ピクセルデータ・画質は変更しない方針
+Ver1 の保存機能は、既知のメタデータ項目に対する `固定長上書き` のみ対応しています。
+
+対象例:
+
+* `JFIF`
+  * `DensityUnit`
+  * `XDensity`
+  * `YDensity`
+* `TIFF / EXIF`
+  * `XResolution`
+  * `YResolution`
+  * `ResolutionUnit`
+  * 一部 ASCII tag
+    * `Make`
+    * `Model`
+    * `Software`
+    * `DateTime`
+    * `DateTimeOriginal`
+
+未対応:
+
+* 任意バイト編集
+* 可変長データの再配置
+* セグメント追加 / 削除
+* PNG / TIFF ファイル本体の対応
 
 ### 技術スタック
 
 * UI: `SwiftUI`
-* アプリ層 / 画像I/O: `Swift`
-* コア計算: `C++`
-* JPEG メタデータ処理: `ImageIO`
-* プロジェクト管理: `XcodeGen`, `Xcode`
+* アプリケーション層: `Swift`
+* 構造解析コア: `C++`
+* 画像プレビュー補助: `ImageIO`
+* プロジェクト管理: `Xcode`, `XcodeGen`
 
 ### ビルド
 
@@ -51,41 +94,86 @@ xcodegen
 
 ### 注意
 
-一部アプリは `JFIF` 解像度を優先表示するため、他アプリ上の DPI 表示と `PixelLens` の表示が一致しない場合があります。
+* Ver1 は `JPEG` のみ対応です
+* 保存機能はまだ限定的で、構造を再配置する高度な編集は行いません
+* 表示される `decoded value` は、現在対応している tag に限られます
 
 ---
 
 ## English
 
-`PixelLens` is a lightweight macOS utility for inspecting and changing JPEG resolution metadata. It is not a general image editor. It focuses on `DPI inspection`, `DPI editing`, and `print size preview`.
+`PixelLens` is a macOS `JPEG structure viewer`.  
+It is not a general-purpose image editor. It is a lightweight inspector for exploring JPEG segment structure, EXIF / TIFF / JFIF metadata, and the matching byte ranges inside the file.
 
-### Current Features
+In Ver1, the project has been redesigned from a `DPI editing tool` into a `data-level image file inspection tool`.
+
+### Current Ver1 Features
 
 * Open JPEG images
-* Show image dimensions
-* Display resolution metadata separately
-  * `TIFF`
-  * `EXIF`
+* Show image preview
+* Display JPEG structure nodes
+  * `SOI`
+  * `APP0`
+  * `APP1`
+  * `DQT`
+  * `DHT`
+  * `SOF`
+  * `SOS`
+  * `EOI`
+* Expand internal `APP0 / APP1` nodes
   * `JFIF`
-* Edit `DPI X / DPI Y`
-* Save as a new file
-* Show calculated print size
+  * `TIFF Header`
+  * `IFD0`
+  * `Exif IFD`
+* Page-based `Bytes` viewer
+* Highlight byte ranges that correspond to the selected structure node
+* Detailed `Inspector` view
+  * `name`
+  * `marker / kind`
+  * `offset / length`
+  * `payload range`
+  * `decoded value`
+  * `raw bytes / payload bytes`
+* Limited structured editing
+  * `Edit Mode`
+  * `pending changes`
+  * `Save As`
 
-### Current Behavior
+### Current Editable Fields
 
-* MVP currently supports `JPEG` only
-* Saving updates `TIFF / EXIF-side` resolution metadata only
-* `JFIF` is displayed but not updated
-* No resampling
-* Pixel count, pixel data, and intended image quality are not changed
+Ver1 saving currently supports only `fixed-length overwrite` for known metadata fields.
+
+Examples:
+
+* `JFIF`
+  * `DensityUnit`
+  * `XDensity`
+  * `YDensity`
+* `TIFF / EXIF`
+  * `XResolution`
+  * `YResolution`
+  * `ResolutionUnit`
+  * Some ASCII tags
+    * `Make`
+    * `Model`
+    * `Software`
+    * `DateTime`
+    * `DateTimeOriginal`
+
+Not supported yet:
+
+* Arbitrary byte editing
+* Variable-length relocation
+* Segment insertion / deletion
+* Full PNG / TIFF file support
 
 ### Tech Stack
 
 * UI: `SwiftUI`
-* App layer / image I/O: `Swift`
-* Core calculation: `C++`
-* JPEG metadata handling: `ImageIO`
-* Project management: `XcodeGen`, `Xcode`
+* Application layer: `Swift`
+* Structure parsing core: `C++`
+* Image preview helper: `ImageIO`
+* Project management: `Xcode`, `XcodeGen`
 
 ### Build
 
@@ -104,6 +192,8 @@ xcodegen
 
 See [BUILD.md](BUILD.md) for details.
 
-### Note
+### Notes
 
-Some apps prioritize `JFIF` resolution metadata, so DPI values shown in other apps may differ from what `PixelLens` shows.
+* Ver1 supports `JPEG` only
+* Saving is still limited and does not perform advanced structural relocation
+* `decoded value` display is limited to currently supported tags
