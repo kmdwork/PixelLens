@@ -3,6 +3,12 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+@_silgen_name("ParseJPEGStructure")
+private func ParseJPEGStructure(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> UnsafePointer<CChar>?
+
+@_silgen_name("FreeJPEGStructureString")
+private func FreeJPEGStructureString(_ value: UnsafePointer<CChar>?)
+
 struct ImageInspection: Codable {
     let width: Int
     let height: Int
@@ -15,6 +21,23 @@ struct ImageInspection: Codable {
     let exifDateTimeOriginal: String?
 }
 
+struct JPEGStructureReport: Codable {
+    let ok: Bool
+    let fileLength: Int?
+    let segmentCount: Int?
+    let segments: [JPEGSegment]?
+    let error: String?
+}
+
+struct JPEGSegment: Codable {
+    let name: String
+    let markerHex: String
+    let offset: Int
+    let length: Int
+    let payloadOffset: Int
+    let payloadLength: Int
+}
+
 enum PocError: Error, CustomStringConvertible {
     case invalidArguments(String)
     case cannotOpenImage(URL)
@@ -22,6 +45,9 @@ enum PocError: Error, CustomStringConvertible {
     case cannotReadProperties(URL)
     case cannotCreateImage(URL)
     case writeFailed(String)
+    case cannotReadFile(URL)
+    case parserFailed(String)
+    case invalidParserOutput
 
     var description: String {
         switch self {
@@ -37,6 +63,12 @@ enum PocError: Error, CustomStringConvertible {
             return "Failed to create image data for: \(url.path)"
         case .writeFailed(let message):
             return "Write failed: \(message)"
+        case .cannotReadFile(let url):
+            return "Failed to read file: \(url.path)"
+        case .parserFailed(let message):
+            return "Parser failed: \(message)"
+        case .invalidParserOutput:
+            return "Parser returned invalid JSON"
         }
     }
 }
@@ -57,6 +89,7 @@ private enum PocCommand {
     case inspect(URL)
     case setDpi(input: URL, output: URL, dpiX: Double, dpiY: Double)
     case makeSample(URL)
+    case inspectJPEGStructure(URL)
 }
 
 @main
@@ -76,6 +109,9 @@ struct App {
                 try createSampleJPEG(at: output)
                 let inspection = try inspectJPEG(at: output)
                 try printJSON(inspection)
+            case .inspectJPEGStructure(let url):
+                let report = try inspectJPEGStructure(at: url)
+                try printJSON(report)
             }
         } catch {
             fputs("\(error)\n", stderr)
@@ -118,6 +154,11 @@ private func parseCommand(arguments: [String]) throws -> PocCommand {
             throw PocError.invalidArguments("Usage: app make-sample <output.jpg>")
         }
         return .makeSample(URL(fileURLWithPath: arguments[2]))
+    case "inspect-jpeg-structure":
+        guard arguments.count == 3 else {
+            throw PocError.invalidArguments("Usage: app inspect-jpeg-structure <input.jpg>")
+        }
+        return .inspectJPEGStructure(URL(fileURLWithPath: arguments[2]))
     default:
         throw PocError.invalidArguments(usageText)
     }
@@ -131,6 +172,31 @@ func inspectJPEG(at url: URL) throws -> ImageInspection {
         throw PocError.cannotReadProperties(url)
     }
     return inspection(from: properties)
+}
+
+func inspectJPEGStructure(at url: URL) throws -> JPEGStructureReport {
+    guard let data = try? Data(contentsOf: url) else {
+        throw PocError.cannotReadFile(url)
+    }
+    let jsonString: String = try data.withUnsafeBytes { rawBuffer in
+        guard let baseAddress = rawBuffer.bindMemory(to: UInt8.self).baseAddress else {
+            throw PocError.cannotReadFile(url)
+        }
+        guard let cString = ParseJPEGStructure(baseAddress, data.count) else {
+            throw PocError.invalidParserOutput
+        }
+        defer { FreeJPEGStructureString(cString) }
+        return String(cString: cString)
+    }
+
+    guard let jsonData = jsonString.data(using: .utf8) else {
+        throw PocError.invalidParserOutput
+    }
+    let report = try JSONDecoder().decode(JPEGStructureReport.self, from: jsonData)
+    if report.ok == false {
+        throw PocError.parserFailed(report.error ?? "Unknown parser error")
+    }
+    return report
 }
 
 func updateJPEGResolution(inputURL: URL, outputURL: URL, dpiX: Double, dpiY: Double) throws {
@@ -270,14 +336,17 @@ func intValue(_ value: Any?) -> Int? {
         return number.intValue
     case let value as Int:
         return value
+    case let value as Double:
+        return Int(value)
     default:
         return nil
     }
 }
 
-let usageText = """
+private let usageText = """
 Usage:
-  app make-sample <output.jpg>
   app inspect <input.jpg>
   app set-dpi <input.jpg> <output.jpg> <dpi> [dpiY]
+  app make-sample <output.jpg>
+  app inspect-jpeg-structure <input.jpg>
 """

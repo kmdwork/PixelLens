@@ -91,7 +91,6 @@ ditto -c -k --sequesterRsrc --keepParent "PixelLens.app" "PixelLens-macOS.zip"
 
 ## 次にやる候補
 
-* アプリアイコン追加
 * `Archive` 手順の確認
 * GitHub Releases 用のバージョン運用
 * 必要なら Developer ID 署名と notarization 対応

@@ -6,6 +6,8 @@ app/.build/
 app/.derivedData/
 app/.swiftpm/
 app/Release/
+app/PixelLens.xcodeproj/xcuserdata/
+app/PixelLens.xcodeproj/project.xcworkspace/xcuserdata/
 
 poc/app/.build/
 poc/app/sample.jpg
@@ -13,4 +15,6 @@ poc/app/sample_300dpi.jpg
 poc/app/.sample_300dpi.jpg-zZ3H
 
 *.xcresult
+*.xcuserstate
+*.xcscmblueprint
 pixellens_icon.png

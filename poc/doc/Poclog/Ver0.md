@@ -1,4 +1,4 @@
-# PoC Var1
+# PoC Var0.1.0
 
 ## 目的
 
@@ -145,7 +145,7 @@ PoC Var1 の範囲では、`Swift + ImageIO` のみで JPEG の `JFIF` と `TIFF
 
 ---
 
-# PoC Var2
+# PoC Var0.1.1
 
 ## 目的
 
