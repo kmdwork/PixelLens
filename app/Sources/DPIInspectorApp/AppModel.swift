@@ -29,11 +29,33 @@ final class AppModel: ObservableObject {
         return selectedSegment.offset..<(selectedSegment.offset + selectedSegment.length)
     }
 
+    var selectedHighlightRanges: [Range<Int>] {
+        guard let document, let selectedSegment else { return [] }
+
+        var ranges: [Range<Int>] = [
+            selectedSegment.offset..<(selectedSegment.offset + selectedSegment.length)
+        ]
+
+        if selectedSegment.hasSeparatePayloadRange {
+            ranges.append(selectedSegment.payloadOffset..<(selectedSegment.payloadOffset + selectedSegment.payloadLength))
+        }
+
+        if let referencedOffset = selectedSegment.referencedOffset {
+            if let targetNode = document.segments.first(where: { $0.offset == referencedOffset }) {
+                ranges.append(targetNode.offset..<(targetNode.offset + targetNode.length))
+            } else {
+                ranges.append(referencedOffset..<(referencedOffset + 2))
+            }
+        }
+
+        return normalizedRanges(ranges)
+    }
+
     var hexLines: [HexLineViewModel] {
         guard let document else { return [] }
         return ImageDocumentService.makeHexLinesForPage(
             data: document.rawData,
-            highlightedRange: selectedSegmentRange,
+            highlightedRanges: selectedHighlightRanges,
             pageIndex: currentBytePage,
             hexViewData: hexViewData
         )
@@ -59,6 +81,17 @@ final class AppModel: ObservableObject {
 
     var pendingChangeCount: Int {
         pendingDecodedValueOverrides.count
+    }
+
+    var mpfStatusText: String? {
+        guard let document else { return nil }
+        if document.hasMPFMarker {
+            return "MPF marker detected / Embedded JPEGs: \(document.embeddedJPEGImages.count)"
+        }
+        if document.embeddedJPEGImages.count > 1 {
+            return "Embedded JPEGs: \(document.embeddedJPEGImages.count)"
+        }
+        return nil
     }
 
     func openPanel() {
@@ -191,6 +224,26 @@ final class AppModel: ObservableObject {
         editDraftValue = displayedDecodedValue(for: selectedSegment)
     }
 
+    func exportEmbeddedJPEG(_ image: EmbeddedJPEGImage) {
+        guard let document else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.jpeg]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = suggestedEmbeddedJPEGFilename(for: document.filename, image: image)
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+        let range = image.startOffset..<image.endOffset
+
+        do {
+            let subdata = document.rawData.subdata(in: range)
+            try subdata.write(to: destinationURL, options: .atomic)
+            statusMessage = "副画像を書き出しました: \(destinationURL.lastPathComponent)"
+        } catch {
+            errorMessage = "副画像を書き出せませんでした。"
+        }
+    }
+
     private func rebuildHexViewMetadata() {
         guard let document else {
             hexViewData = HexViewData(displayedByteCount: 0, totalByteCount: 0, totalLineCount: 0, bytesPerLine: 16, linesPerPage: 85)
@@ -209,5 +262,32 @@ final class AppModel: ObservableObject {
     private func suggestedSaveFilename(for filename: String) -> String {
         let base = (filename as NSString).deletingPathExtension
         return base + "_edited.jpg"
+    }
+
+    private func suggestedEmbeddedJPEGFilename(for filename: String, image: EmbeddedJPEGImage) -> String {
+        let base = (filename as NSString).deletingPathExtension
+        let suffix = image.isPrimary ? "primary" : image.label.replacingOccurrences(of: " ", with: "_").lowercased()
+        return "\(base)_\(suffix).jpg"
+    }
+
+    private func normalizedRanges(_ ranges: [Range<Int>]) -> [Range<Int>] {
+        let sorted = ranges
+            .filter { $0.lowerBound < $0.upperBound }
+            .sorted { lhs, rhs in lhs.lowerBound < rhs.lowerBound }
+
+        guard var current = sorted.first else { return [] }
+        var result: [Range<Int>] = []
+
+        for range in sorted.dropFirst() {
+            if range.lowerBound <= current.upperBound {
+                current = current.lowerBound..<max(current.upperBound, range.upperBound)
+            } else {
+                result.append(current)
+                current = range
+            }
+        }
+
+        result.append(current)
+        return result
     }
 }

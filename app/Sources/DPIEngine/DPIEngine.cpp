@@ -19,6 +19,7 @@ struct Node {
     size_t payloadOffset;
     size_t payloadLength;
     std::string decodedValue;
+    int referencedOffset;
     std::string editValueType;
     std::string byteOrder;
     size_t maxEditableLength;
@@ -322,6 +323,7 @@ bool appendIFDNode(
         ifdOffset + 2,
         static_cast<size_t>(entryCount) * 12,
         std::to_string(entryCount) + " entries",
+        -1,
         "",
         littleEndian ? "le" : "be",
         0,
@@ -359,6 +361,7 @@ bool appendIFDNode(
         );
 
         std::string editValueType;
+        int referencedOffset = -1;
         if (tag == 0x011A || tag == 0x011B || tag == 0x829A || tag == 0x829D || tag == 0x920A) {
             editValueType = "tiff-rational";
         } else if (type == 2 || tag == 0x9000) {
@@ -367,6 +370,9 @@ bool appendIFDNode(
             editValueType = "tiff-short";
         } else if (type == 4) {
             editValueType = "tiff-long";
+        }
+        if (tag == 0x8769 && safeValueSize >= 4) {
+            referencedOffset = static_cast<int>(tiffOffset + readU32(bytes, entryOffset + 8, littleEndian));
         }
 
         ifdNode.children.push_back(Node{
@@ -378,6 +384,7 @@ bool appendIFDNode(
             valueOffset,
             safeValueSize,
             decodedValue,
+            referencedOffset,
             editValueType,
             littleEndian ? "le" : "be",
             safeValueSize,
@@ -420,6 +427,7 @@ void appendTIFFChildren(
         tiffOffset + 4,
         4,
         littleEndian ? "Little Endian" : "Big Endian",
+        -1,
         "",
         littleEndian ? "le" : "be",
         0,
@@ -439,15 +447,15 @@ void appendAppChildren(Node &node, const uint8_t *bytes, size_t fileLength) {
             uint16_t xDensity = static_cast<uint16_t>((payload[8] << 8) | payload[9]);
             uint16_t yDensity = static_cast<uint16_t>((payload[10] << 8) | payload[11]);
 
-            node.children.push_back({"Identifier", "jfif-field", "", node.payloadOffset, 5, node.payloadOffset, 5, "JFIF", "", "be", 0, {}});
+            node.children.push_back({"Identifier", "jfif-field", "", node.payloadOffset, 5, node.payloadOffset, 5, "JFIF", -1, "", "be", 0, {}});
             node.children.push_back({"Version", "jfif-field", "", node.payloadOffset + 5, 2, node.payloadOffset + 5, 2,
-                                     std::to_string(payload[5]) + "." + std::to_string(payload[6]), "", "be", 0, {}});
+                                     std::to_string(payload[5]) + "." + std::to_string(payload[6]), -1, "", "be", 0, {}});
             node.children.push_back({"DensityUnit", "jfif-field", "", node.payloadOffset + 7, 1, node.payloadOffset + 7, 1,
-                                     densityUnitName(densityUnit), "jfif-u8", "be", 1, {}});
+                                     densityUnitName(densityUnit), -1, "jfif-u8", "be", 1, {}});
             node.children.push_back({"XDensity", "jfif-field", "", node.payloadOffset + 8, 2, node.payloadOffset + 8, 2,
-                                     std::to_string(xDensity), "jfif-u16", "be", 2, {}});
+                                     std::to_string(xDensity), -1, "jfif-u16", "be", 2, {}});
             node.children.push_back({"YDensity", "jfif-field", "", node.payloadOffset + 10, 2, node.payloadOffset + 10, 2,
-                                     std::to_string(yDensity), "jfif-u16", "be", 2, {}});
+                                     std::to_string(yDensity), -1, "jfif-u16", "be", 2, {}});
             node.decodedValue = "JFIF";
         }
     }
@@ -456,7 +464,7 @@ void appendAppChildren(Node &node, const uint8_t *bytes, size_t fileLength) {
         const uint8_t *payload = bytes + node.payloadOffset;
         if (std::memcmp(payload, "Exif\0\0", 6) == 0) {
             node.decodedValue = "Exif";
-            node.children.push_back({"Exif Header", "exif-header", "", node.payloadOffset, 6, node.payloadOffset, 6, "Exif\\0\\0", "", "be", 0, {}});
+            node.children.push_back({"Exif Header", "exif-header", "", node.payloadOffset, 6, node.payloadOffset, 6, "Exif\\0\\0", -1, "", "be", 0, {}});
             appendTIFFChildren(node, bytes, fileLength, node.payloadOffset + 6, node.payloadLength - 6);
         }
     }
@@ -473,6 +481,11 @@ void writeNodeJSON(std::ostringstream &stream, const Node &node, int indent) {
     stream << pad << "  \"payloadOffset\" : " << node.payloadOffset << ",\n";
     stream << pad << "  \"payloadLength\" : " << node.payloadLength << ",\n";
     stream << pad << "  \"decodedValue\" : \"" << jsonEscape(node.decodedValue) << "\",\n";
+    if (node.referencedOffset >= 0) {
+        stream << pad << "  \"referencedOffset\" : " << node.referencedOffset << ",\n";
+    } else {
+        stream << pad << "  \"referencedOffset\" : null,\n";
+    }
     stream << pad << "  \"editValueType\" : \"" << jsonEscape(node.editValueType) << "\",\n";
     stream << pad << "  \"byteOrder\" : \"" << jsonEscape(node.byteOrder) << "\",\n";
     stream << pad << "  \"maxEditableLength\" : " << node.maxEditableLength << ",\n";
@@ -492,7 +505,7 @@ std::string parseToJSON(const uint8_t *bytes, size_t length) {
     }
 
     std::vector<Node> segments;
-    segments.push_back({"SOI", "marker", "0xFFD8", 0, 2, 2, 0, "", "", "be", 0, {}});
+    segments.push_back({"SOI", "marker", "0xFFD8", 0, 2, 2, 0, "", -1, "", "be", 0, {}});
 
     size_t cursor = 2;
     while (cursor < length) {
@@ -511,12 +524,12 @@ std::string parseToJSON(const uint8_t *bytes, size_t length) {
         cursor += 1;
 
         if (marker == 0xD9) {
-            segments.push_back({"EOI", "marker", "0xFFD9", markerOffset, 2, markerOffset + 2, 0, "", "", "be", 0, {}});
+            segments.push_back({"EOI", "marker", "0xFFD9", markerOffset, 2, markerOffset + 2, 0, "", -1, "", "be", 0, {}});
             break;
         }
 
         if (!hasDeclaredLength(marker)) {
-            segments.push_back({markerName(marker), "marker", markerHex(marker), markerOffset, 2, markerOffset + 2, 0, "", "", "be", 0, {}});
+            segments.push_back({markerName(marker), "marker", markerHex(marker), markerOffset, 2, markerOffset + 2, 0, "", -1, "", "be", 0, {}});
             continue;
         }
 
@@ -536,8 +549,8 @@ std::string parseToJSON(const uint8_t *bytes, size_t length) {
             }
             const size_t totalLength = eoiOffset - markerOffset;
             const size_t payloadLength = totalLength - 4;
-            segments.push_back({"SOS", "segment", "0xFFDA", markerOffset, totalLength, payloadOffset, payloadLength, "", "", "be", 0, {}});
-            segments.push_back({"EOI", "marker", "0xFFD9", eoiOffset, 2, eoiOffset + 2, 0, "", "", "be", 0, {}});
+            segments.push_back({"SOS", "segment", "0xFFDA", markerOffset, totalLength, payloadOffset, payloadLength, "", -1, "", "be", 0, {}});
+            segments.push_back({"EOI", "marker", "0xFFD9", eoiOffset, 2, eoiOffset + 2, 0, "", -1, "", "be", 0, {}});
             break;
         }
 
@@ -549,7 +562,7 @@ std::string parseToJSON(const uint8_t *bytes, size_t length) {
         }
 
         Node node{markerName(marker), "segment", markerHex(marker), markerOffset, totalLength, payloadOffset,
-                  static_cast<size_t>(declaredLength - 2), "", "", "be", 0, {}};
+                  static_cast<size_t>(declaredLength - 2), "", -1, "", "be", 0, {}};
         appendAppChildren(node, bytes, length);
         segments.push_back(node);
         cursor = markerOffset + totalLength;

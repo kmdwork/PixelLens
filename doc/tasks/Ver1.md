@@ -4,42 +4,47 @@
 
 `AGETNS.md` の Ver1 要件を、実装順に落としたタスクリストである。
 
-Ver1 の MVP は `JPEG read-only 構造可視化ツール` とし、
-まずは以下を成立させる。
+Ver1 の中心目的は、`JPEG の内部構造を見て理解できるアプリ` を成立させることである。
 
-* JPEG を開ける
-* 構造一覧を見られる
-* バイト列を見られる
-* 構造選択で対応範囲をハイライトできる
-* 選択ノードの詳細を見られる
+現時点では、Ver1 の基礎機能はすでに成立している。
 
-現時点で最小版はすでに実装済みであり、
-ここからは以下の改善を優先する。
+現在できること:
 
-* byte viewer の軽量化
-* Inspector の raw info 強化
-* `APP0 / APP1` の子ノード生成
-* `EXIF / TIFF` tag parser 追加
+* JPEG の読み込み
+* 構造一覧の表示
+* `APP0 / APP1 / IFD0 / Exif IFD` の表示
+* `Bytes` ビューでのページ表示
+* 構造選択時のハイライト
+* `IFD entry + pointed value` の複数ハイライト
+* `Inspector` での `Entry Range / Value Range / Referenced Offset` 表示
+* `Edit Mode`
+* `pending changes`
+* `Save As`
+* `MPF` を含む複数画像 JPEG の検出
+* 副画像 JPEG の切り出し
 
-進捗メモ:
+つまり Ver1 は、単なる `JPEG read-only viewer` ではなく、
+`構造可視化 + 限定編集 + MPF の最低限対応` まで進んでいる。
 
-* `APP0 / APP1` の子ノード生成は実装済み
-* `IFD0` に加えて `Exif IFD` の展開を開始済み
-* `Edit Mode` と `pending changes` の UI 土台は実装済み
-* `Save As` の最小経路は実装済み
-* 現在の保存対応は `JFIF / TIFF / EXIF` の既知 tag に対する固定長上書きのみ
+一方で、まだ意図的に範囲を絞っている部分もある。
 
-その次の段階として、
-`read-only viewer` から `構造化メタデータ編集` へ進める。
+現在の制限:
 
-編集機能の初期方針:
+* 対応形式は `JPEG` のみ
+* 保存は `JFIF / TIFF / EXIF` の既知 tag に対する固定長上書きのみ
+* 可変長再配置は未対応
+* 任意バイト編集は未対応
+* `GPS IFD / ICC / XMP / APP2` 一般解析は後回し
 
-* 直接バイト編集は行わない
-* `Inspector` ベースで既知の値だけ編集する
-* `Edit Mode` と通常閲覧モードを分ける
-* 初期は `Save As` のみ
-* 保存前に変更点を確認できるようにする
-* 初期保存は `可変長再配置なし` の固定長書き換えに限定する
+Ver1 後半の目的は、対象形式を増やす前に
+`JPEG の構造表示体験をまず磨き切ること` に置く。
+
+そのための方針:
+
+* 参照構造を持つ tag の見せ方を先に固める
+* 編集は `Inspector` ベースの構造化編集に限定する
+* `MPF` のような JPEG 内の構造拡張に先に対応する
+* その後で `PNG / TIFF / WebP` など他形式へ広げる
 
 ---
 
@@ -250,6 +255,21 @@ Ver1 の MVP は `JPEG read-only 構造可視化ツール` とし、
 
 * `APP0` などを選ぶと対応バイトが視覚的にわかる
 
+### 5-3. `IFD entry + pointed value` の複数ハイライト
+
+内容:
+
+* `IFD entry` 自体の 12-byte 範囲をハイライトする
+* 参照先 value を持つ tag は、その value 側も同時にハイライトする
+* 例:
+  * `ExifIFDPointer`
+  * `XResolution`
+  * `YResolution`
+
+完了条件:
+
+* 参照構造を持つ tag を選んだとき、entry と value の両方が視覚的に分かる
+
 ---
 
 ## Phase 6: Inspector
@@ -268,6 +288,55 @@ Ver1 の MVP は `JPEG read-only 構造可視化ツール` とし、
 完了条件:
 
 * 選択ノードの基本情報を確認できる
+
+### 6-2. `Entry Range / Value Range / Referenced Offset` の追加
+
+内容:
+
+* IFD tag に対して `Entry Range` を表示する
+* value が別位置にある場合は `Value Range` を表示する
+* pointer 系 tag は `Referenced Offset` を表示する
+
+完了条件:
+
+* `IFD entry` と `実データ位置` の関係が Inspector だけで追える
+
+---
+
+## Phase 7: MPF 対応
+
+### 7-1. `MPF` を含む JPEG の検出
+
+内容:
+
+* `APP2` 内の `MPF` シグネチャを検出する
+* 単一 JPEG 前提ではないことを UI に示す
+
+完了条件:
+
+* `MPF` を含むファイルを通常 JPEG と区別できる
+
+### 7-2. 副画像の位置情報取得
+
+内容:
+
+* `MPF` エントリから主画像 / 副画像の offset を読む
+* 少なくとも副画像 JPEG の開始・終了候補を特定する
+
+完了条件:
+
+* 副画像をバイト範囲として識別できる
+
+### 7-3. 副画像の切り出し
+
+内容:
+
+* 副画像を別 JPEG として抽出できる
+* 必要なら UI から保存できる形にする
+
+完了条件:
+
+* `MPF` を含む JPEG から副画像を切り出して確認できる
 
 ### 6-2. 補足説明を入れる
 

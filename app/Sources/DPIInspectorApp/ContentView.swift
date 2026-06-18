@@ -108,6 +108,9 @@ struct ContentView: View {
                     infoRow(label: "ファイル", value: document.filename)
                     infoRow(label: "サイズ", value: "\(document.width) x \(document.height) px")
                     infoRow(label: "バイト数", value: "\(document.fileSize)")
+                    if let mpfStatusText = model.mpfStatusText {
+                        infoRow(label: "MPF", value: mpfStatusText)
+                    }
                     Divider()
                     LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(document.segments) { segment in
@@ -156,28 +159,57 @@ struct ContentView: View {
 
     private func previewPanel(_ document: ImageStructureDocument) -> some View {
         sectionCard(title: "Preview") {
-            VStack(alignment: .leading, spacing: 12) {
-                if let image = document.previewImage {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 320)
-                        .background(Color.white.opacity(0.6))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                } else {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.white.opacity(0.6))
-                        .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 320)
-                        .overlay {
-                            Text("プレビューを表示できません")
-                                .foregroundStyle(Color.black.opacity(0.72))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let image = document.previewImage {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 320)
+                            .background(Color.white.opacity(0.6))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    } else {
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.white.opacity(0.6))
+                            .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 320)
+                            .overlay {
+                                Text("プレビューを表示できません")
+                                    .foregroundStyle(Color.black.opacity(0.72))
+                            }
+                    }
+                    Text("Ver1 MVP ではプレビューは補助表示です。構造解析の中心は左の一覧と下のバイト列です。")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.72))
+                    if let mpfStatusText = model.mpfStatusText {
+                        Divider()
+                        Text(mpfStatusText)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.38, green: 0.27, blue: 0.1))
+                    }
+                    if document.embeddedJPEGImages.count > 1 {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(document.embeddedJPEGImages.filter { !$0.isPrimary }) { embeddedImage in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(embeddedImage.label)
+                                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                                        Text("\(embeddedImage.width) x \(embeddedImage.height)  /  \(embeddedImage.rangeLabel)")
+                                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                            .foregroundStyle(Color.black.opacity(0.72))
+                                    }
+                                    Spacer()
+                                    Button("書き出し") {
+                                        model.exportEmbeddedJPEG(embeddedImage)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
                         }
+                    }
+                    Spacer(minLength: 0)
                 }
-                Text("Ver1 MVP ではプレビューは補助表示です。構造解析の中心は左の一覧と下のバイト列です。")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.72))
-                Spacer(minLength: 0)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(width: 300)
         .frame(minHeight: topPanelHeight, maxHeight: topPanelHeight, alignment: .top)
@@ -219,8 +251,11 @@ struct ContentView: View {
                         infoRow(label: "Kind", value: segment.kind)
                         infoRow(label: "Offset", value: "\(segment.offset)")
                         infoRow(label: "Length", value: "\(segment.length)")
-                        infoRow(label: "Range", value: segment.byteRangeLabel)
-                        infoRow(label: "Payload", value: segment.payloadRangeLabel)
+                        infoRow(label: "Entry Range", value: segment.byteRangeLabel)
+                        infoRow(label: "Value Range", value: segment.payloadRangeLabel)
+                        if let referencedOffset = segment.referencedOffset {
+                            infoRow(label: "Referenced Offset", value: "\(referencedOffset)")
+                        }
                         let displayedDecodedValue = model.displayedDecodedValue(for: segment)
                         if !displayedDecodedValue.isEmpty {
                             infoRow(label: "Decoded", value: displayedDecodedValue)
@@ -385,18 +420,24 @@ private struct BytePageViewer: View {
                                 .frame(width: 88, alignment: .leading)
 
                             HStack(spacing: 0) {
-                                Text(line.hexPrefix)
-                                if !line.hexHighlight.isEmpty {
-                                    Text(line.hexHighlight)
-                                        .background(Color(red: 0.98, green: 0.87, blue: 0.49))
+                                ForEach(line.hexTokens) { token in
+                                    Text(token.text)
+                                        .background(token.isHighlighted ? Color(red: 0.98, green: 0.87, blue: 0.49) : Color.clear)
+                                    if token.id != line.hexTokens.last?.id {
+                                        Text(" ")
+                                    }
                                 }
-                                Text(line.hexSuffix)
                             }
                             .frame(minWidth: 500, alignment: .leading)
 
-                            Text(line.ascii)
-                                .foregroundStyle(Color.black.opacity(0.72))
-                                .frame(minWidth: 120, alignment: .leading)
+                            HStack(spacing: 0) {
+                                ForEach(line.asciiTokens) { token in
+                                    Text(token.text)
+                                        .foregroundStyle(Color.black.opacity(0.72))
+                                        .background(token.isHighlighted ? Color(red: 0.98, green: 0.87, blue: 0.49) : Color.clear)
+                                }
+                            }
+                            .frame(minWidth: 120, alignment: .leading)
                         }
                         .frame(height: 20, alignment: .topLeading)
                         .font(.system(size: 11, weight: .medium, design: .monospaced))

@@ -20,6 +20,7 @@ public struct SegmentNodeViewModel: Identifiable, Equatable {
     public let payloadOffset: Int
     public let payloadLength: Int
     public let decodedValue: String
+    public let referencedOffset: Int?
     public let editMetadata: EditMetadata?
     public let depth: Int
 
@@ -30,19 +31,42 @@ public struct SegmentNodeViewModel: Identifiable, Equatable {
     public var payloadRangeLabel: String {
         "\(payloadOffset) ..< \(payloadOffset + payloadLength)"
     }
+
+    public var hasSeparatePayloadRange: Bool {
+        payloadLength > 0 && (payloadOffset != offset || payloadLength != length)
+    }
+}
+
+public struct HexTokenViewModel: Identifiable, Equatable {
+    public let id: String
+    public let text: String
+    public let isHighlighted: Bool
 }
 
 public struct HexLineViewModel: Identifiable, Equatable {
     public let id: Int
     public let lineOffset: Int
-    public let hexPrefix: String
-    public let hexHighlight: String
-    public let hexSuffix: String
-    public let highlightedRange: Range<Int>?
-    public let ascii: String
+    public let hexTokens: [HexTokenViewModel]
+    public let asciiTokens: [HexTokenViewModel]
 
     public var offsetLabel: String {
         String(format: "%08X", lineOffset)
+    }
+}
+
+public struct EmbeddedJPEGImage: Identifiable, Equatable {
+    public let id: String
+    public let label: String
+    public let startOffset: Int
+    public let endOffset: Int
+    public let length: Int
+    public let isPrimary: Bool
+    public let width: Int
+    public let height: Int
+    public let previewImage: NSImage?
+
+    public var rangeLabel: String {
+        "\(startOffset) ..< \(endOffset)"
     }
 }
 
@@ -55,6 +79,8 @@ public struct ImageStructureDocument {
     public let fileSize: Int
     public let rawData: Data
     public let segments: [SegmentNodeViewModel]
+    public let embeddedJPEGImages: [EmbeddedJPEGImage]
+    public let hasMPFMarker: Bool
 }
 
 public struct HexViewData {
@@ -111,6 +137,9 @@ public enum ImageDocumentError: Error, LocalizedError {
         case .cannotWriteFile:
             return "ファイルを書き出せませんでした。"
         case .parserFailed(let message):
+            if message == "Not a JPEG file" {
+                return "これは JPEG ではありません。"
+            }
             return "JPEG 構造解析に失敗しました: \(message)"
         case .invalidParserOutput:
             return "構造解析結果を読み取れませんでした。"
@@ -123,9 +152,22 @@ public enum ImageDocumentError: Error, LocalizedError {
 }
 
 private struct JPEGStructureReport: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case segments
+        case error
+    }
+
     let ok: Bool
     let segments: [JPEGSegment]
     let error: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        segments = try container.decodeIfPresent([JPEGSegment].self, forKey: .segments) ?? []
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
 }
 
 private struct JPEGSegment: Decodable {
@@ -137,6 +179,7 @@ private struct JPEGSegment: Decodable {
     let payloadOffset: Int
     let payloadLength: Int
     let decodedValue: String
+    let referencedOffset: Int?
     let editValueType: String
     let byteOrder: String
     let maxEditableLength: Int
@@ -166,7 +209,9 @@ public enum ImageDocumentService {
             previewImage: NSImage(contentsOf: fileURL),
             fileSize: rawData.count,
             rawData: rawData,
-            segments: try parseSegments(from: rawData)
+            segments: try parseSegments(from: rawData),
+            embeddedJPEGImages: detectEmbeddedJPEGImages(in: rawData),
+            hasMPFMarker: rawData.range(of: Data("MPF\0".utf8)) != nil
         )
     }
 
@@ -195,7 +240,7 @@ public enum ImageDocumentService {
 
     public static func makeHexLinesForPage(
         data: Data,
-        highlightedRange: Range<Int>?,
+        highlightedRanges: [Range<Int>],
         pageIndex: Int,
         hexViewData: HexViewData,
         maxDisplayedBytes: Int = .max
@@ -212,21 +257,33 @@ public enum ImageDocumentService {
             let end = min(offset + hexViewData.bytesPerLine, bytes.count)
             let lineBytes = Array(bytes[offset..<end])
             let absoluteLineRange = offset..<end
-            let lineHighlight = highlightedRange.flatMap { range -> Range<Int>? in
+            var highlightedByteOffsets: Set<Int> = []
+            for range in highlightedRanges {
                 let lower = max(absoluteLineRange.lowerBound, range.lowerBound)
                 let upper = min(absoluteLineRange.upperBound, range.upperBound)
-                guard lower < upper else { return nil }
-                return (lower - offset)..<(upper - offset)
+                guard lower < upper else { continue }
+                for value in lower..<upper {
+                    highlightedByteOffsets.insert(value - offset)
+                }
             }
 
             return HexLineViewModel(
                 id: offset,
                 lineOffset: offset,
-                hexPrefix: lineHexString(bytes: lineBytes, range: 0..<(lineHighlight?.lowerBound ?? lineBytes.count)),
-                hexHighlight: lineHighlight.map { lineHexString(bytes: lineBytes, range: $0) } ?? "",
-                hexSuffix: lineHighlight.map { lineHexString(bytes: lineBytes, range: $0.upperBound..<lineBytes.count) } ?? "",
-                highlightedRange: lineHighlight,
-                ascii: asciiString(bytes: lineBytes)
+                hexTokens: lineBytes.enumerated().map { index, byte in
+                    HexTokenViewModel(
+                        id: "\(offset)-hex-\(index)",
+                        text: formatByte(byte),
+                        isHighlighted: highlightedByteOffsets.contains(index)
+                    )
+                },
+                asciiTokens: lineBytes.enumerated().map { index, byte in
+                    HexTokenViewModel(
+                        id: "\(offset)-ascii-\(index)",
+                        text: asciiCharacter(byte: byte),
+                        isHighlighted: highlightedByteOffsets.contains(index)
+                    )
+                }
             )
         }
     }
@@ -357,10 +414,8 @@ private func lineHexString(bytes: [UInt8], range: Range<Int>) -> String {
     return bytes[lower..<upper].map { formatByte($0) }.joined(separator: " ") + " "
 }
 
-private func asciiString(bytes: [UInt8]) -> String {
-    bytes.map { byte in
-        (32...126).contains(Int(byte)) ? String(UnicodeScalar(byte)) : "."
-    }.joined()
+private func asciiCharacter(byte: UInt8) -> String {
+    (32...126).contains(Int(byte)) ? String(UnicodeScalar(byte)) : "."
 }
 
 private func flatten(segment: JPEGSegment, idPrefix: String, depth: Int, into result: inout [SegmentNodeViewModel]) {
@@ -375,6 +430,7 @@ private func flatten(segment: JPEGSegment, idPrefix: String, depth: Int, into re
             payloadOffset: segment.payloadOffset,
             payloadLength: segment.payloadLength,
             decodedValue: segment.decodedValue,
+            referencedOffset: segment.referencedOffset,
             editMetadata: makeEditMetadata(segment: segment),
             depth: depth
         )
@@ -382,6 +438,109 @@ private func flatten(segment: JPEGSegment, idPrefix: String, depth: Int, into re
     for (childIndex, child) in segment.children.enumerated() {
         flatten(segment: child, idPrefix: "\(idPrefix).\(childIndex)", depth: depth + 1, into: &result)
     }
+}
+
+private func detectEmbeddedJPEGImages(in data: Data) -> [EmbeddedJPEGImage] {
+    let bytes = [UInt8](data)
+    guard bytes.count >= 4 else { return [] }
+
+    var results: [EmbeddedJPEGImage] = []
+    var cursor = 0
+    var index = 0
+
+    while cursor + 1 < bytes.count {
+        if bytes[cursor] == 0xFF && bytes[cursor + 1] == 0xD8 {
+            if let endOffset = findJPEGEnd(from: cursor, bytes: bytes) {
+                let range = cursor..<(endOffset + 2)
+                let subData = Data(bytes[range])
+                let subImage = NSImage(data: subData)
+                let size = subImage?.size ?? .zero
+                results.append(
+                    EmbeddedJPEGImage(
+                        id: "embedded-\(index)",
+                        label: index == 0 ? "Primary Image" : "Secondary Image \(index)",
+                        startOffset: cursor,
+                        endOffset: endOffset + 2,
+                        length: range.count,
+                        isPrimary: index == 0,
+                        width: Int(size.width),
+                        height: Int(size.height),
+                        previewImage: subImage
+                    )
+                )
+                index += 1
+                cursor = endOffset + 2
+                continue
+            }
+        }
+        cursor += 1
+    }
+
+    return results
+}
+
+private func findJPEGEnd(from startOffset: Int, bytes: [UInt8]) -> Int? {
+    var cursor = startOffset + 2
+    let length = bytes.count
+
+    while cursor + 1 < length {
+        if bytes[cursor] != 0xFF {
+            cursor += 1
+            continue
+        }
+
+        let markerOffset = cursor
+        cursor += 1
+        while cursor < length && bytes[cursor] == 0xFF { cursor += 1 }
+        guard cursor < length else { return nil }
+        let marker = bytes[cursor]
+        cursor += 1
+
+        if marker == 0xD9 {
+            return markerOffset
+        }
+
+        if marker == 0x00 || (0xD0...0xD7).contains(marker) || marker == 0x01 {
+            continue
+        }
+
+        guard cursor + 1 < length else { return nil }
+        let declaredLength = Int(bytes[cursor]) << 8 | Int(bytes[cursor + 1])
+        guard declaredLength >= 2 else { return nil }
+        let payloadOffset = cursor + 2
+
+        if marker == 0xDA {
+            return findEOIAfterSOSBytes(bytes: bytes, start: payloadOffset + declaredLength - 2)
+        }
+
+        cursor = markerOffset + declaredLength + 2
+    }
+
+    return nil
+}
+
+private func findEOIAfterSOSBytes(bytes: [UInt8], start: Int) -> Int? {
+    var index = start
+    while index + 1 < bytes.count {
+        if bytes[index] != 0xFF {
+            index += 1
+            continue
+        }
+        let markerIndex = index
+        index += 1
+        while index < bytes.count && bytes[index] == 0xFF { index += 1 }
+        guard index < bytes.count else { return nil }
+        let marker = bytes[index]
+        if marker == 0x00 || (0xD0...0xD7).contains(marker) {
+            index += 1
+            continue
+        }
+        if marker == 0xD9 {
+            return markerIndex
+        }
+        return nil
+    }
+    return nil
 }
 
 private func makeEditMetadata(segment: JPEGSegment) -> SegmentNodeViewModel.EditMetadata? {

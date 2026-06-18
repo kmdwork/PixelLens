@@ -193,13 +193,4 @@ PoC Ver1 の第1段階として、`JPEG read-only parser` は成立した。
 ## 次の候補
 
 1.
-構造結果を SwiftUI で扱いやすいノードモデルへ変換する
-
-2.
-`offset-range` を使って、hex viewer 用の選択範囲モデルを作る
-
-3.
-JPEG の `APP0 / APP1` 内部もさらに分解する
-
-4.
 別 JPEG ファイルでも parser の頑健性を確認する
